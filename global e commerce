@@ -1,0 +1,835 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GLOBAL MOBILE E-Shop</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="module">
+        // Firebase imports for persistence (mandatory for e-commerce apps)
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, getDoc, onSnapshot, collection, addDoc, serverTimestamp, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // IMPORTANT: Global variables for Canvas environment
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        let db;
+        let auth;
+        let userId = null;
+        let isAuthReady = false;
+
+        let state = {
+            products: [],
+            cart: {},
+            currentCategory: 'All Products',
+            searchTerm: ''
+        };
+
+        // --- CORE PRODUCT DATA (COMPREHENSIVE LIST) ---
+        const RAW_PRODUCT_DATA = [
+            // --- General Audio / TWS / Neckband ---
+            { id: 'tws-1', name: '91 prime', price: 680, category: 'Audio', brand: 'Unknown' },
+            { id: 'tws-2', name: 'Vs102', price: 690, category: 'Audio', brand: 'Unknown' },
+            { id: 'tws-3', name: 'Alpha', price: 720, category: 'Audio', brand: 'Unknown' },
+            { id: 'tws-4', name: '121 pro', price: 830, category: 'Audio', brand: 'Unknown' },
+            { id: 'b-tws-1', name: 'Boat 138', price: 610, category: 'Audio', brand: 'Boat' },
+            { id: 'b-tws-2', name: 'BOAT 131 batman edition', price: 610, category: 'Audio', brand: 'Boat' },
+            { id: 'b-tws-3', name: 'Boat 131 pro', price: 850, category: 'Audio', brand: 'Boat' },
+            { id: 'b-tws-4', name: 'Boat 163', price: 640, category: 'Audio', brand: 'Boat' },
+            { id: 'b-tws-5', name: 'Airdopes 91', price: 800, category: 'Audio', brand: 'Boat' },
+            { id: 'b-tws-6', name: 'Airdopes 115', price: 700, category: 'Audio', brand: 'Boat' },
+            { id: 'b-tws-7', name: 'Airdopes 155', price: 750, category: 'Audio', brand: 'Boat' },
+            { id: 'b-tws-8', name: 'Airdopes 280', price: 1000, category: 'Audio', brand: 'Boat' },
+            { id: 'b-tws-9', name: 'Airdopes 301', price: 750, category: 'Audio', brand: 'Boat' },
+            { id: 'a-83', name: 'Atom 83', price: 700, category: 'Audio', brand: 'Atom' },
+            { id: 'n-tws-1', name: 'NOISE VS 102', price: 740, category: 'Audio', brand: 'Noise' },
+            { id: 'n-tws-2', name: 'Noise arrow', price: 720, category: 'Audio', brand: 'Noise' },
+            { id: 'op-nb-1', name: 'One + Z2 Neckband', price: 1200, category: 'Audio', brand: 'OnePlus' },
+            { id: 'b-nb-1', name: 'Boat neckband 103v2 pro', price: 700, category: 'Audio', brand: 'Boat' },
+            { id: 'b-nb-2', name: 'Boat Neckband 103 pro', price: 650, category: 'Audio', brand: 'Boat' },
+            
+            // --- Smart Watches ---
+            { id: 'fb-w-1', name: 'FIRE BOLT JAGUAR', price: 950, category: 'Smart Watch', brand: 'Fire-Bolt' },
+            { id: 'fb-w-2', name: 'FIRE BOLT EDGE', price: 1000, category: 'Smart Watch', brand: 'Fire-Bolt' },
+            { id: 'fb-w-3', name: 'FIRE BOLT ASSAULT', price: 1150, category: 'Smart Watch', brand: 'Fire-Bolt' },
+            { id: 'fb-w-4', name: 'FIRE BOLT XELOR', price: 1300, category: 'Smart Watch', brand: 'Fire-Bolt' },
+            { id: 'fb-w-5', name: 'FIRE BOLT TALK', price: 1050, category: 'Smart Watch', brand: 'Fire-Bolt' },
+            { id: 'fb-w-6', name: 'FIRE BOLT GLADITOR+', price: 1250, category: 'Smart Watch', brand: 'Fire-Bolt' },
+            { id: 'b-w-1', name: 'BOAT Lunar ORB', price: 1350, category: 'Smart Watch', brand: 'Boat' },
+            { id: 'b-w-2', name: 'BOAT Lunar VISTA', price: 1350, category: 'Smart Watch', brand: 'Boat' },
+            { id: 'b-w-3', name: 'BOAT Lunar CALL', price: 1350, category: 'Smart Watch', brand: 'Boat' },
+            { id: 'b-w-4', name: 'BOAT Lunar CONNECT', price: 1350, category: 'Smart Watch', brand: 'Boat' },
+            { id: 'x-w-1', name: 'Xiaomi Watch 5active', price: 1750, category: 'Smart Watch', brand: 'Xiaomi' },
+
+            // --- Feature Phones ---
+            { id: 'j-fp-1', name: 'Karbon k1', price: 600, category: 'Feature Phone', brand: 'Jio' },
+            { id: 'j-fp-2', name: 'V3 & V4', price: 630, category: 'Feature Phone', brand: 'Jio' },
+            { id: 'n-fp-1', name: 'Nokia 105 SS (w/o charger)', price: 950, category: 'Feature Phone', brand: 'Nokia' },
+            { id: 'n-fp-2', name: 'Nokia 105 SS (classic w/ charger)', price: 1020, category: 'Feature Phone', brand: 'Nokia' },
+            { id: 'n-fp-3', name: 'Nokia 105 DS (w/o charger)', price: 1030, category: 'Feature Phone', brand: 'Nokia' },
+            { id: 'n-fp-4', name: 'Nokia 105 SS (UPI VALA)', price: 1060, category: 'Feature Phone', brand: 'Nokia' },
+            { id: 'n-fp-5', name: 'Nokia 106 (Mem Card VALA)', price: 1240, category: 'Feature Phone', brand: 'Nokia' },
+            { id: 'n-fp-6', name: 'Nokia 106 4g', price: 2020, category: 'Feature Phone', brand: 'Nokia' },
+            { id: 'n-fp-7', name: 'Nokia 130 dual sim+ memcard', price: 1600, category: 'Feature Phone', brand: 'Nokia' },
+            { id: 'h-fp-1', name: 'HMD 105', price: 850, category: 'Feature Phone', brand: 'HMD' },
+            { id: 'h-fp-2', name: 'HMD 110', price: 1090, category: 'Feature Phone', brand: 'HMD' },
+            { id: 'i-fp-1', name: 'Itel A50c', price: 4900, category: 'Feature Phone', brand: 'Itel', specs: '2GB/32GB' },
+            { id: 'i-fp-2', name: 'Itel A90', price: 5150, category: 'Feature Phone', brand: 'Itel', specs: '3GB/64GB' },
+            { id: 'i-fp-3', name: 'Itel A90', price: 5350, category: 'Feature Phone', brand: 'Itel', specs: '4GB/64GB' },
+            { id: 'i-fp-4', name: 'Itel A90', price: 5950, category: 'Feature Phone', brand: 'Itel', specs: '4GB/128GB' },
+
+            // --- Accessories ---
+            { id: 'o-acc-1', name: 'OPPO Type-C Headphone', price: 290, category: 'Accessory', brand: 'OPPO' },
+            { id: 'o-acc-2', name: 'OPPO Earphone', price: 230, category: 'Accessory', brand: 'OPPO' },
+            { id: 'o-acc-3', name: 'OPPO Type-C cable', price: 200, category: 'Accessory', brand: 'OPPO' },
+            { id: 'o-acc-4', name: 'OPPO OG ADOPTOR', price: 500, category: 'Accessory', brand: 'OPPO' },
+            { id: 'v-acc-1', name: 'VIVO Type-C EARPHONE', price: 350, category: 'Accessory', brand: 'Vivo' },
+            { id: 'v-acc-2', name: 'VIVO OG adoptor', price: 470, category: 'Accessory', brand: 'Vivo' },
+            { id: 'x-acc-1', name: 'Xiaomi Power bank 4i 10k Mah', price: 950, category: 'Accessory', brand: 'Xiaomi' },
+            { id: 'x-acc-2', name: 'Xiaomi Power bank 3i 20k Mah', price: 1600, category: 'Accessory', brand: 'Xiaomi' },
+            { id: 'x-acc-3', name: 'Xiaomi Power bank 4i 20k Mah', price: 1700, category: 'Accessory', brand: 'Xiaomi' },
+            { id: 'x-acc-4', name: 'Xiaomi Pocket Power Bank 10k', price: 1350, category: 'Accessory', brand: 'Xiaomi' },
+            { id: 'x-acc-5', name: 'Xiaomi Buds 5a', price: 880, category: 'Audio', brand: 'Xiaomi' },
+            { id: 'x-acc-6', name: 'Xiaomi Buds 5c', price: 1150, category: 'Audio', brand: 'Xiaomi' },
+            { id: 'x-acc-7', name: 'Xiaomi Buds 5', price: 1970, category: 'Audio', brand: 'Xiaomi' },
+            { id: 'r-acc-1', name: 'Realme T01', price: 800, category: 'Audio', brand: 'Realme' },
+            { id: 'r-acc-2', name: 'Realme T110 AirPod', price: 900, category: 'Audio', brand: 'Realme' },
+            { id: 'r-acc-3', name: 'Realme Buds wireless 3 Neo Neckband', price: 850, category: 'Audio', brand: 'Realme' },
+            { id: 'op-acc-1', name: 'One + Buds 2r', price: 1400, category: 'Audio', brand: 'OnePlus' },
+            { id: 'op-acc-2', name: 'One + Z2 ear buds', price: 2600, category: 'Audio', brand: 'OnePlus' },
+            { id: 'op-acc-3', name: 'One + Z2 Neckband', price: 1150, category: 'Audio', brand: 'OnePlus' },
+            { id: 'op-acc-4', name: 'One + Og cable tyep c 1.5m', price: 700, category: 'Accessory', brand: 'OnePlus' },
+            { id: 's-acc-1', name: 'SAMSUNG C to C Type cable', price: 400, category: 'Accessory', brand: 'Samsung' },
+            { id: 's-acc-2', name: 'SAMSUNG 25 watt adoptor', price: 900, category: 'Accessory', brand: 'Samsung' },
+
+            // --- OPPO Mobile Phones ---
+            { id: 'o-1', name: 'A5x', price: 6850, category: 'Mobile Phone', brand: 'OPPO', specs: '4GB/64GB, 4G' },
+            { id: 'o-2', name: 'A3x 5g', price: 8500, category: 'Mobile Phone', brand: 'OPPO', specs: '4GB/64GB, 5G' },
+            { id: 'o-3', name: 'A5x 5g', price: 9000, category: 'Mobile Phone', brand: 'OPPO', specs: '4GB/64GB, 5G' },
+            { id: 'o-4', name: 'A5x', price: 9850, category: 'Mobile Phone', brand: 'OPPO', specs: '4GB/128GB' },
+            { id: 'o-5', name: 'A5x', price: 11200, category: 'Mobile Phone', brand: 'OPPO', specs: '6GB/128GB' },
+            { id: 'o-6', name: 'A5 (Act)', price: 12100, category: 'Mobile Phone', brand: 'OPPO', specs: '6GB/128GB (Activated)' },
+            { id: 'o-7', name: 'A5 (Fresh)', price: 12300, category: 'Mobile Phone', brand: 'OPPO', specs: '6GB/128GB (Fresh)' },
+            { id: 'o-8', name: 'A5', price: 13400, category: 'Mobile Phone', brand: 'OPPO', specs: '8GB/128GB' },
+            { id: 'o-9', name: 'A5 pro', price: 14000, category: 'Mobile Phone', brand: 'OPPO', specs: '8GB/128GB' },
+            { id: 'o-10', name: 'A5 pro (Fresh)', price: 14200, category: 'Mobile Phone', brand: 'OPPO', specs: '8GB/256GB (Fresh)' },
+            { id: 'o-11', name: 'A5 pro', price: 15900, category: 'Mobile Phone', brand: 'OPPO', specs: '8GB/256GB' },
+            { id: 'o-12', name: 'A5 pro (Fresh)', price: 16200, category: 'Mobile Phone', brand: 'OPPO', specs: '8GB/256GB (Fresh)' },
+            { id: 'o-13', name: 'k13x', price: 10200, category: 'Mobile Phone', brand: 'OPPO', specs: '4GB/128GB' },
+            { id: 'o-14', name: 'k13x', price: 11200, category: 'Mobile Phone', brand: 'OPPO', specs: '6GB/128GB' },
+            { id: 'o-15', name: 'K13x', price: 12500, category: 'Mobile Phone', brand: 'OPPO', specs: '8GB/128GB' },
+            { id: 'o-16', name: 'K13', price: 15700, category: 'Mobile Phone', brand: 'OPPO', specs: '8GB/128GB' },
+            { id: 'o-17', name: 'K13', price: 17700, category: 'Mobile Phone', brand: 'OPPO', specs: '8GB/256GB' },
+            { id: 'o-18', name: 'K13 turbo', price: 20800, category: 'Mobile Phone', brand: 'OPPO', specs: '8GB/128GB' },
+            { id: 'o-19', name: 'F29', price: 18000, category: 'Mobile Phone', brand: 'OPPO', specs: '8GB/256GB (F)' },
+            { id: 'o-20', name: 'F29 pro', price: 22000, category: 'Mobile Phone', brand: 'OPPO', specs: '12GB/256GB' },
+            { id: 'o-21', name: 'F31 (Act)', price: 18750, category: 'Mobile Phone', brand: 'OPPO', specs: '8GB/128GB (Activated)' },
+            { id: 'o-22', name: 'F31 (Act)', price: 20750, category: 'Mobile Phone', brand: 'OPPO', specs: '8GB/256GB (Activated)' },
+            { id: 'o-23', name: 'F31 (Fresh)', price: 19100, category: 'Mobile Phone', brand: 'OPPO', specs: '8GB/128GB (Fresh)' },
+            { id: 'o-24', name: 'F31 (Fresh)', price: 21000, category: 'Mobile Phone', brand: 'OPPO', specs: '8GB/256GB (Fresh)' },
+            { id: 'o-25', name: 'F31pro', price: 20500, category: 'Mobile Phone', brand: 'OPPO', specs: '8GB/128GB' },
+            { id: 'o-26', name: 'F31pro', price: 22500, category: 'Mobile Phone', brand: 'OPPO', specs: '8GB/256GB' },
+            { id: 'o-27', name: 'F31 pro', price: 24500, category: 'Mobile Phone', brand: 'OPPO', specs: '12GB/256GB' },
+
+            // --- VIVO Mobile Phones ---
+            { id: 'v-1', name: 'Y19e', price: 7250, category: 'Mobile Phone', brand: 'Vivo', specs: '4GB/64GB' },
+            { id: 'v-2', name: 'Y19 5g', price: 9400, category: 'Mobile Phone', brand: 'Vivo', specs: '4GB/64GB, 5G' },
+            { id: 'v-3', name: 'Y19 5g', price: 10350, category: 'Mobile Phone', brand: 'Vivo', specs: '4GB/128GB, 5G' },
+            { id: 'v-4', name: 'Y19', price: 11600, category: 'Mobile Phone', brand: 'Vivo', specs: '6GB/128GB' },
+            { id: 'v-5', name: 'Y29 (Fresh)', price: 12400, category: 'Mobile Phone', brand: 'Vivo', specs: '4GB/128GB (Fresh)' },
+            { id: 'v-6', name: 'Y31', price: 13100, category: 'Mobile Phone', brand: 'Vivo', specs: '4GB/128GB' },
+            { id: 'v-7', name: 'Y31 (Act)', price: 14000, category: 'Mobile Phone', brand: 'Vivo', specs: '6GB/128GB (Activated)' },
+            { id: 'v-8', name: 'Y31 (Fresh)', price: 14350, category: 'Mobile Phone', brand: 'Vivo', specs: '6GB/128GB (Fresh)' },
+            { id: 'v-9', name: 'Y31 pro', price: 16700, category: 'Mobile Phone', brand: 'Vivo', specs: '8GB/128GB' },
+            { id: 'v-10', name: 'Y31 pro', price: 18600, category: 'Mobile Phone', brand: 'Vivo', specs: '8GB/256GB' },
+            { id: 'v-11', name: 'Y39', price: 16700, category: 'Mobile Phone', brand: 'Vivo', specs: '8GB/256GB' },
+            { id: 'v-12', name: 'Y400', price: 19400, category: 'Mobile Phone', brand: 'Vivo', specs: '8GB/128GB' },
+            { id: 'v-13', name: 'Y400', price: 20900, category: 'Mobile Phone', brand: 'Vivo', specs: '8GB/256GB' },
+            { id: 'v-14', name: 'T4 lite', price: 9950, category: 'Mobile Phone', brand: 'Vivo', specs: '4GB/128GB' },
+            { id: 'v-15', name: 'T4 lite', price: 11000, category: 'Mobile Phone', brand: 'Vivo', specs: '6GB/128GB' },
+            { id: 'v-16', name: 'T4 lite', price: 13100, category: 'Mobile Phone', brand: 'Vivo', specs: '8GB/256GB' },
+            { id: 'v-17', name: 'T4x', price: 13900, category: 'Mobile Phone', brand: 'Vivo', specs: '6GB/128GB' },
+            { id: 'v-18', name: 'T4x', price: 14900, category: 'Mobile Phone', brand: 'Vivo', specs: '8GB/128GB' },
+            { id: 'v-19', name: 'T4x', price: 16800, category: 'Mobile Phone', brand: 'Vivo', specs: '8GB/256GB' },
+            { id: 'v-20', name: 'T4r', price: 18400, category: 'Mobile Phone', brand: 'Vivo', specs: '8GB/128GB' },
+            { id: 'v-21', name: 'T4r', price: 20500, category: 'Mobile Phone', brand: 'Vivo', specs: '8GB/256GB' },
+            { id: 'v-22', name: 'T4r', price: 21900, category: 'Mobile Phone', brand: 'Vivo', specs: '12GB/255GB' },
+            { id: 'v-23', name: 'T4', price: 19500, category: 'Mobile Phone', brand: 'Vivo', specs: '8GB/128GB' },
+            { id: 'v-24', name: 'T4', price: 21700, category: 'Mobile Phone', brand: 'Vivo', specs: '8GB/256GB' },
+            { id: 'v-25', name: 'T4', price: 23500, category: 'Mobile Phone', brand: 'Vivo', specs: '12GB/256GB' },
+
+            // --- IQZ SERIES (Vivo Sub-Brand) ---
+            { id: 'z-1', name: 'IQZ10LITE', price: 9750, category: 'Mobile Phone', brand: 'IQZ', specs: '4GB/128GB' },
+            { id: 'z-2', name: 'IQZ10x', price: 12400, category: 'Mobile Phone', brand: 'IQZ', specs: '6GB/128GB' },
+            { id: 'z-3', name: 'Z10x', price: 13700, category: 'Mobile Phone', brand: 'IQZ', specs: '8GB/128GB' },
+            { id: 'z-4', name: 'Z10r', price: 17700, category: 'Mobile Phone', brand: 'IQZ', specs: '8GB/128GB' },
+            { id: 'z-5', name: 'Z10r', price: 20000, category: 'Mobile Phone', brand: 'IQZ', specs: '8GB/256GB' },
+            { id: 'z-6', name: 'IQZ10', price: 19800, category: 'Mobile Phone', brand: 'IQZ', specs: '8GB/128GB' },
+            { id: 'z-7', name: 'IQZ10', price: 30500, category: 'Mobile Phone', brand: 'IQZ', specs: '8GB/256GB' },
+
+            // --- Redmi Mobile Phones ---
+            { id: 'r-1', name: 'A3x', price: 6350, category: 'Mobile Phone', brand: 'Redmi', specs: '4GB/128GB' },
+            { id: 'r-2', name: 'A5', price: 5650, category: 'Mobile Phone', brand: 'Redmi', specs: '3GB/64GB' },
+            { id: 'r-3', name: 'A5 (Airtel)', price: 5500, category: 'Mobile Phone', brand: 'Redmi', specs: '3GB/64GB (Airtel)' },
+            { id: 'r-4', name: 'A5', price: 6700, category: 'Mobile Phone', brand: 'Redmi', specs: '4GB/128GB' },
+            { id: 'r-5', name: 'A4', price: 7450, category: 'Mobile Phone', brand: 'Redmi', specs: '4GB/64GB' },
+            { id: 'r-6', name: 'A4', price: 8150, category: 'Mobile Phone', brand: 'Redmi', specs: '4GB/128GB' },
+            { id: 'r-7', name: '13', price: 11200, category: 'Mobile Phone', brand: 'Redmi', specs: '8GB/128GB' },
+            { id: 'r-8', name: '14SE', price: 12800, category: 'Mobile Phone', brand: 'Redmi', specs: '6GB/128GB' },
+            { id: 'r-9', name: '14c 5g', price: 8100, category: 'Mobile Phone', brand: 'Redmi', specs: '4GB/64GB, 5G' },
+            { id: 'r-10', name: '14C 5g', price: 8550, category: 'Mobile Phone', brand: 'Redmi', specs: '4GB/128GB, 5G' },
+            { id: 'r-11', name: '14C 5g', price: 9400, category: 'Mobile Phone', brand: 'Redmi', specs: '6GB/128GB, 5G' },
+            { id: 'r-12', name: 'Note 14', price: 14300, category: 'Mobile Phone', brand: 'Redmi', specs: '8GB/128GB' },
+            { id: 'r-13', name: 'Note 14', price: 15600, category: 'Mobile Phone', brand: 'Redmi', specs: '8GB/256GB' },
+            { id: 'r-14', name: 'Note 14 pro', price: 18700, category: 'Mobile Phone', brand: 'Redmi', specs: '8GB/128GB' },
+            { id: 'r-15', name: 'Note 14 pro', price: 20700, category: 'Mobile Phone', brand: 'Redmi', specs: '8GB/256GB' },
+            { id: 'r-16', name: 'Note 14 pro+', price: 23000, category: 'Mobile Phone', brand: 'Redmi', specs: '8GB/128GB' },
+            { id: 'r-17', name: 'Note 14 pro+', price: 24000, category: 'Mobile Phone', brand: 'Redmi', specs: '8GB/256GB' },
+            { id: 'r-18', name: 'Note 14 pro+', price: 26900, category: 'Mobile Phone', brand: 'Redmi', specs: '12GB/512GB' },
+            { id: 'r-19', name: '15', price: 12900, category: 'Mobile Phone', brand: 'Redmi', specs: '6GB/128GB' },
+            { id: 'r-20', name: '15', price: 13700, category: 'Mobile Phone', brand: 'Redmi', specs: '8GB/128GB' },
+            { id: 'r-21', name: '15', price: 14500, category: 'Mobile Phone', brand: 'Redmi', specs: '8GB/256GB' },
+
+            // --- Xiaomi Tablets ---
+            { id: 'x-tab-1', name: 'Pad 2', price: 15000, category: 'Tablet', brand: 'Xiaomi', specs: '6GB/128GB' },
+            { id: 'x-tab-2', name: 'Pad2', price: 16800, category: 'Tablet', brand: 'Xiaomi', specs: '8GB/256GB' },
+            { id: 'x-tab-3', name: 'Pad7', price: 24900, category: 'Tablet', brand: 'Xiaomi', specs: '8GB/128GB' },
+            { id: 'x-tab-4', name: 'Pad pro', price: 22200, category: 'Tablet', brand: 'Xiaomi', specs: '8GB/128GB' },
+            { id: 'x-tab-5', name: 'Pad pro', price: 24200, category: 'Tablet', brand: 'Xiaomi', specs: '8GB/256GB' },
+
+            // --- Poco Mobile Phones ---
+            { id: 'p-1', name: 'C71', price: 5800, category: 'Mobile Phone', brand: 'Poco', specs: '4GB/64GB' },
+            { id: 'p-2', name: 'C71', price: 6650, category: 'Mobile Phone', brand: 'Poco', specs: '6GB/128GB' },
+            { id: 'p-3', name: 'C75', price: 7100, category: 'Mobile Phone', brand: 'Poco', specs: '4GB/64GB' },
+            { id: 'p-4', name: 'C75', price: 7900, category: 'Mobile Phone', brand: 'Poco', specs: '4GB/128GB' },
+            { id: 'p-5', name: 'M7', price: 8400, category: 'Mobile Phone', brand: 'Poco', specs: '6GB/128GB' },
+            { id: 'p-6', name: 'M7', price: 9500, category: 'Mobile Phone', brand: 'Poco', specs: '8GB/128GB' },
+            { id: 'p-7', name: 'M7 pro', price: 12250, category: 'Mobile Phone', brand: 'Poco', specs: '6GB/128GB' },
+            { id: 'p-8', name: 'M7 pro', price: 14350, category: 'Mobile Phone', brand: 'Poco', specs: '8GB/256GB' },
+
+            // --- Realme Mobile Phones ---
+            { id: 'rl-1', name: 'C61', price: 5950, category: 'Mobile Phone', brand: 'Realme', specs: '4GB/64GB' },
+            { id: 'rl-2', name: 'C71 (Act)', price: 6150, category: 'Mobile Phone', brand: 'Realme', specs: '4GB/64GB (Activated)' },
+            { id: 'rl-3', name: 'C71', price: 6300, category: 'Mobile Phone', brand: 'Realme', specs: '4GB/64GB' },
+            { id: 'rl-4', name: 'C63 5g', price: 11500, category: 'Mobile Phone', brand: 'Realme', specs: '8GB/128GB, 5G' },
+            { id: 'rl-5', name: 'C73 5g (Fresh)', price: 10100, category: 'Mobile Phone', brand: 'Realme', specs: '4GB/128GB, 5G (Fresh)' },
+            { id: 'rl-6', name: 'C75', price: 10800, category: 'Mobile Phone', brand: 'Realme', specs: '4GB/128GB' },
+            { id: 'rl-7', name: 'C75', price: 11800, category: 'Mobile Phone', brand: 'Realme', specs: '6GB/128GB' },
+            { id: 'rl-8', name: '14t', price: 16900, category: 'Mobile Phone', brand: 'Realme', specs: '8GB/256GB' },
+            { id: 'rl-9', name: '14x', price: 11800, category: 'Mobile Phone', brand: 'Realme', specs: '6GB/128GB' },
+            { id: 'rl-10', name: '14x', price: 12700, category: 'Mobile Phone', brand: 'Realme', specs: '8GB/128GB' },
+            { id: 'rl-11', name: '15x', price: 13400, category: 'Mobile Phone', brand: 'Realme', specs: '6GB/128GB' },
+            { id: 'rl-12', name: '15x', price: 14300, category: 'Mobile Phone', brand: 'Realme', specs: '8GB/128GB' },
+            { id: 'rl-13', name: '15x', price: 16200, category: 'Mobile Phone', brand: 'Realme', specs: '8GB/256GB' },
+            { id: 'rl-14', name: '15 lite', price: 15800, category: 'Mobile Phone', brand: 'Realme', specs: '8GB/128GB' },
+            { id: 'rl-15', name: '15 lite', price: 17800, category: 'Mobile Phone', brand: 'Realme', specs: '8GB/256GB' },
+            { id: 'rl-16', name: '15t', price: 16500, category: 'Mobile Phone', brand: 'Realme', specs: '8GB/128GB' },
+            { id: 'rl-17', name: '15t', price: 18500, category: 'Mobile Phone', brand: 'Realme', specs: '8GB/256GB' },
+            { id: 'rl-18', name: '15t', price: 21500, category: 'Mobile Phone', brand: 'Realme', specs: '12GB/256GB' },
+            { id: 'rl-19', name: '15', price: 20400, category: 'Mobile Phone', brand: 'Realme', specs: '8GB/128GB' },
+            { id: 'rl-20', name: '15', price: 22300, category: 'Mobile Phone', brand: 'Realme', specs: '8GB/256GB' },
+            { id: 'rl-21', name: '15', price: 24200, category: 'Mobile Phone', brand: 'Realme', specs: '12GB/256GB' },
+            { id: 'rl-22', name: '15 pro', price: 25500, category: 'Mobile Phone', brand: 'Realme', specs: '8GB/128GB' },
+            { id: 'rl-23', name: '15 pro', price: 27400, category: 'Mobile Phone', brand: 'Realme', specs: '8GB/256GB' },
+            { id: 'rl-24', name: '15 pro', price: 29300, category: 'Mobile Phone', brand: 'Realme', specs: '12GB/256GB' },
+            { id: 'rl-25', name: '15 pro', price: 31000, category: 'Mobile Phone', brand: 'Realme', specs: '12GB/512GB' },
+            { id: 'rl-26', name: 'P3 lite', price: 9400, category: 'Mobile Phone', brand: 'Realme', specs: '4GB/128GB' },
+            { id: 'rl-27', name: 'P3 lite', price: 10400, category: 'Mobile Phone', brand: 'Realme', specs: '6GB/128GB' },
+            { id: 'rl-28', name: 'P3x', price: 10550, category: 'Mobile Phone', brand: 'Realme', specs: '6GB/128GB' },
+            { id: 'rl-29', name: 'P3x', price: 11600, category: 'Mobile Phone', brand: 'Realme', specs: '8GB/128GB' },
+            { id: 'rl-30', name: 'P3 pro', price: 16400, category: 'Mobile Phone', brand: 'Realme', specs: '8GB/128GB' },
+            { id: 'rl-31', name: 'P4', price: 15600, category: 'Mobile Phone', brand: 'Realme', specs: '6GB/128GB' },
+            { id: 'rl-32', name: 'P4', price: 16600, category: 'Mobile Phone', brand: 'Realme', specs: '8GB/128GB' },
+            { id: 'rl-33', name: 'P4', price: 18600, category: 'Mobile Phone', brand: 'Realme', specs: '8GB/256GB' },
+            { id: 'rl-34', name: 'P4 pro', price: 21500, category: 'Mobile Phone', brand: 'Realme', specs: '8GB/128GB' },
+            { id: 'rl-35', name: 'P4 pro', price: 23500, category: 'Mobile Phone', brand: 'Realme', specs: '8GB/256GB' },
+            { id: 'rl-36', name: 'GT 7t', price: 27400, category: 'Mobile Phone', brand: 'Realme', specs: '8GB/256GB' },
+            { id: 'rl-37', name: 'Gt7t', price: 30100, category: 'Mobile Phone', brand: 'Realme', specs: '12GB/256GB' },
+            // Narzo Series (Realme Sub-Brand)
+            { id: 'nz-1', name: 'Narzo 80 lite 4g', price: 6150, category: 'Mobile Phone', brand: 'Narzo', specs: '4GB/64GB, 4G' },
+            { id: 'nz-2', name: 'Narzo 80 lite 4g', price: 7150, category: 'Mobile Phone', brand: 'Narzo', specs: '6GB/128GB, 4G' },
+            { id: 'nz-3', name: 'Narzo 80 lite 5g', price: 9150, category: 'Mobile Phone', brand: 'Narzo', specs: '4GB/128GB, 5G' },
+            { id: 'nz-4', name: 'Narzo 80 lite 5g', price: 9900, category: 'Mobile Phone', brand: 'Narzo', specs: '6GB/128GB, 5G' },
+            { id: 'nz-5', name: 'Narzo 80x', price: 10900, category: 'Mobile Phone', brand: 'Narzo', specs: '6GB/128GB' },
+            { id: 'nz-6', name: 'Narzo 80x', price: 11800, category: 'Mobile Phone', brand: 'Narzo', specs: '8GB/128GB' },
+            { id: 'nz-7', name: 'Narzo 80 pro', price: 20800, category: 'Mobile Phone', brand: 'Narzo', specs: '12GB/256GB' },
+
+            // --- Tecno Mobile Phones ---
+            { id: 't-1', name: 'Pop 9 5g', price: 7600, category: 'Mobile Phone', brand: 'Tecno', specs: '4GB/64GB, 5G' },
+            { id: 't-2', name: 'Pop 9 5g', price: 8100, category: 'Mobile Phone', brand: 'Tecno', specs: '4GB/128GB, 5G' },
+            { id: 't-3', name: 'Go2', price: 6000, category: 'Mobile Phone', brand: 'Tecno', specs: '3GB/64GB' },
+            { id: 't-4', name: 'Go 2', price: 6150, category: 'Mobile Phone', brand: 'Tecno', specs: '4GB/64GB' },
+            { id: 't-5', name: 'Go 5g', price: 8500, category: 'Mobile Phone', brand: 'Tecno', specs: '4GB/128GB' },
+            { id: 't-6', name: '30C 5g', price: 10750, category: 'Mobile Phone', brand: 'Tecno', specs: '8GB/128GB, 5G' },
+            { id: 't-7', name: 'Pova7', price: 12000, category: 'Mobile Phone', brand: 'Tecno', specs: '6GB/128GB' },
+            { id: 't-8', name: 'Curve neo', price: 14100, category: 'Mobile Phone', brand: 'Tecno', specs: '6GB/128GB' },
+            { id: 't-9', name: 'Curve', price: 14600, category: 'Mobile Phone', brand: 'Tecno', specs: '8GB/128GB' },
+            { id: 't-10', name: 'Curve slim', price: 17700, category: 'Mobile Phone', brand: 'Tecno', specs: '8GB/128GB' },
+
+            // --- Infinix Mobile Phones ---
+            { id: 'i-1', name: 'Smart 10 hd', price: 6200, category: 'Mobile Phone', brand: 'Infinix', specs: '4GB/64GB' },
+            { id: 'i-2', name: 'Hot60i', price: 8700, category: 'Mobile Phone', brand: 'Infinix', specs: '4GB/128GB' },
+            { id: 'i-3', name: 'hot 60', price: 9650, category: 'Mobile Phone', brand: 'Infinix', specs: '6GB/128GB' },
+            { id: 'i-4', name: 'Note 50x', price: 10800, category: 'Mobile Phone', brand: 'Infinix', specs: '6GB/128GB' },
+            { id: 'i-5', name: 'Note 50x', price: 11800, category: 'Mobile Phone', brand: 'Infinix', specs: '8GB/128GB' },
+            { id: 'i-6', name: 'Note 50s', price: 14600, category: 'Mobile Phone', brand: 'Infinix', specs: '6GB/128GB' },
+            { id: 'i-7', name: 'GT 30 (w/ kit)', price: 17600, category: 'Mobile Phone', brand: 'Infinix', specs: '8GB/128GB (with kit)' },
+            { id: 'i-8', name: 'GT 30 (w/ kit)', price: 19300, category: 'Mobile Phone', brand: 'Infinix', specs: '8GB/256GB (with kit)' },
+            { id: 'i-9', name: 'Gt30 pro (w/ kit)', price: 22800, category: 'Mobile Phone', brand: 'Infinix', specs: '8GB/256GB (with kit)' },
+            { id: 'i-10', name: 'GT 30 pro (w/ kit)', price: 24700, category: 'Mobile Phone', brand: 'Infinix', specs: '12GB/256GB (with kit)' },
+
+            // --- OnePlus Mobile Phones (excluding audio) ---
+            { id: 'op-1', name: 'Ce 5', price: 23100, category: 'Mobile Phone', brand: 'OnePlus', specs: '8GB/128GB' },
+            { id: 'op-2', name: 'Ce5', price: 25200, category: 'Mobile Phone', brand: 'OnePlus', specs: '8GB/256GB' },
+            { id: 'op-3', name: 'Nord5', price: 29800, category: 'Mobile Phone', brand: 'OnePlus', specs: '8GB/256GB' },
+
+            // --- iPhone ---
+            { id: 'ip-1', name: 'iPhone 15', price: 49700, category: 'Mobile Phone', brand: 'Apple', specs: '128GB' },
+            { id: 'ip-2', name: 'iPhone 15 (Blue)', price: 50200, category: 'Mobile Phone', brand: 'Apple', specs: '128GB (Blue)' },
+            { id: 'ip-3', name: 'iPhone 16', price: 59500, category: 'Mobile Phone', brand: 'Apple', specs: '128GB' },
+            { id: 'ip-4', name: 'iPhone 16 PRO (Black)', price: 98500, category: 'Mobile Phone', brand: 'Apple', specs: '128GB (Black)' },
+            { id: 'ip-5', name: 'iPhone 16 pro (Desert)', price: 99500, category: 'Mobile Phone', brand: 'Apple', specs: '128GB (Desert)' },
+            { id: 'ip-6', name: 'iPhone 16 pro (Black)', price: 110500, category: 'Mobile Phone', brand: 'Apple', specs: '256GB (Black)' },
+            { id: 'ip-7', name: 'iPhone 16 pro (Desert)', price: 112000, category: 'Mobile Phone', brand: 'Apple', specs: '256GB (Desert)' },
+            { id: 'ip-8', name: 'iPhone 16 pro max', price: 116000, category: 'Mobile Phone', brand: 'Apple', specs: '256GB' },
+            { id: 'ip-9', name: 'iPhone 17 pro', price: 129500, category: 'Mobile Phone', brand: 'Apple', specs: '256GB' },
+
+            // --- SAMSUNG Mobile Phones & Tablet ---
+            { id: 's-1', name: 'A04E', price: 7000, category: 'Mobile Phone', brand: 'Samsung', specs: '3GB/32GB' },
+            { id: 's-2', name: 'A06 4g', price: 6800, category: 'Mobile Phone', brand: 'Samsung', specs: '4GB/64GB, 4G' },
+            { id: 's-3', name: 'A06 5g', price: 8200, category: 'Mobile Phone', brand: 'Samsung', specs: '4GB/64GB, 5G' },
+            { id: 's-4', name: 'A06', price: 9100, category: 'Mobile Phone', brand: 'Samsung', specs: '4GB/128GB' },
+            { id: 's-5', name: 'A06 5g', price: 11000, category: 'Mobile Phone', brand: 'Samsung', specs: '6GB/128GB, 5G' },
+            { id: 's-6', name: 'A16', price: 13800, category: 'Mobile Phone', brand: 'Samsung', specs: '6GB/128GB' },
+            { id: 's-7', name: 'A17', price: 15900, category: 'Mobile Phone', brand: 'Samsung', specs: '6GB/128GB' },
+            { id: 's-8', name: 'A17', price: 17100, category: 'Mobile Phone', brand: 'Samsung', specs: '8GB/128GB' },
+            { id: 's-9', name: 'A17', price: 19800, category: 'Mobile Phone', brand: 'Samsung', specs: '8GB/256GB' },
+            { id: 's-10', name: 'A36', price: 23600, category: 'Mobile Phone', brand: 'Samsung', specs: '8GB/128GB' },
+            { id: 's-11', name: 'A36', price: 26300, category: 'Mobile Phone', brand: 'Samsung', specs: '8GB/256GB' },
+            { id: 's-12', name: 'A36', price: 29300, category: 'Mobile Phone', brand: 'Samsung', specs: '12GB/256GB' },
+            { id: 's-13', name: 'A56', price: 34600, category: 'Mobile Phone', brand: 'Samsung', specs: '8GB/256GB' },
+            { id: 's-14', name: 'A56', price: 37400, category: 'Mobile Phone', brand: 'Samsung', specs: '12GB/256GB' },
+            { id: 's-15', name: 'M07', price: 7150, category: 'Mobile Phone', brand: 'Samsung', specs: '4GB/64GB' },
+            { id: 's-16', name: 'F07', price: 7150, category: 'Mobile Phone', brand: 'Samsung', specs: '4GB/64GB' },
+            { id: 's-17', name: 'M16', price: 10950, category: 'Mobile Phone', brand: 'Samsung', specs: '4GB/128GB' },
+            { id: 's-18', name: 'M16', price: 11900, category: 'Mobile Phone', brand: 'Samsung', specs: '6GB/128GB' },
+            { id: 's-19', name: 'F17', price: 13000, category: 'Mobile Phone', brand: 'Samsung', specs: '4GB/128GB' },
+            { id: 's-20', name: 'F17', price: 14500, category: 'Mobile Phone', brand: 'Samsung', specs: '6GB/128GB' },
+            { id: 's-21', name: 'F17', price: 15900, category: 'Mobile Phone', brand: 'Samsung', specs: '8GB/128GB' },
+            { id: 's-22', name: 'M06', price: 8100, category: 'Mobile Phone', brand: 'Samsung', specs: '4GB/128GB' },
+            { id: 's-23', name: 'M06 5g', price: 9150, category: 'Mobile Phone', brand: 'Samsung', specs: '6GB/128GB, 5G' },
+            { id: 's-24', name: 'M36', price: 13900, category: 'Mobile Phone', brand: 'Samsung', specs: '6GB/128GB' },
+            { id: 's-25', name: 'F36', price: 14400, category: 'Mobile Phone', brand: 'Samsung', specs: '6GB/128GB' },
+            { id: 's-26', name: 'F36', price: 15600, category: 'Mobile Phone', brand: 'Samsung', specs: '8GB/128GB' },
+            { id: 's-27', name: 'S24 fe', price: 30700, category: 'Mobile Phone', brand: 'Samsung', specs: '8GB/128GB' },
+            { id: 's-28', name: 'S24fe', price: 35000, category: 'Mobile Phone', brand: 'Samsung', specs: '8GB/256GB' },
+            { id: 's-29', name: 'S24', price: 39300, category: 'Mobile Phone', brand: 'Samsung', specs: '8GB/128GB' },
+            { id: 's-30', name: 'S24', price: 45500, category: 'Mobile Phone', brand: 'Samsung', specs: '8GB/256GB' },
+            { id: 's-tab-1', name: 'TAB A9+', price: 15900, category: 'Tablet', brand: 'Samsung', specs: '8GB/128GB' },
+            
+            // --- MOTOROLA Mobile Phones ---
+            { id: 'm-1', name: 'G45', price: 11300, category: 'Mobile Phone', brand: 'Motorola', specs: '8GB/128GB' },
+            { id: 'm-2', name: 'G85', price: 15100, category: 'Mobile Phone', brand: 'Motorola', specs: '8GB/128GB' },
+            { id: 'm-3', name: 'G86', price: 15200, category: 'Mobile Phone', brand: 'Motorola', specs: '8GB/128GB' },
+            { id: 'm-4', name: 'G96', price: 15400, category: 'Mobile Phone', brand: 'Motorola', specs: '8GB/128GB' },
+            { id: 'm-5', name: 'G96', price: 17400, category: 'Mobile Phone', brand: 'Motorola', specs: '8GB/256GB' },
+            { id: 'm-6', name: '60 fusion', price: 19200, category: 'Mobile Phone', brand: 'Motorola', specs: '8GB/256GB' },
+            { id: 'm-7', name: '60 fusion', price: 21100, category: 'Mobile Phone', brand: 'Motorola', specs: '12GB/256GB' },
+
+            // --- LED TV & Smart Devices ---
+            { id: 'tv-1', name: 'Fire Tv stock 3rd gen', price: 2300, category: 'TV/Smart Device', brand: 'Amazon' },
+            { id: 'tv-2', name: 'Xiaomi 32 inch fire tv', price: 9800, category: 'LED TV', brand: 'Xiaomi' },
+            { id: 'tv-3', name: 'Xiaomi 32 Inch googel Tv A', price: 10500, category: 'LED TV', brand: 'Xiaomi' },
+            { id: 'tv-4', name: 'Xiaomi 32 inch Qled', price: 12000, category: 'LED TV', brand: 'Xiaomi' },
+            { id: 'tv-5', name: 'Xiaomi 43 inch Googel Tv A', price: 18000, category: 'LED TV', brand: 'Xiaomi' },
+            { id: 'tv-6', name: 'Xiaomi 43 inch Googel Tv x', price: 21800, category: 'LED TV', brand: 'Xiaomi' },
+            { id: 'tv-7', name: 'Xiaomi 50 Inch Googel Tv x', price: 27400, category: 'LED TV', brand: 'Xiaomi' },
+            { id: 'tv-8', name: 'Xiaomi 55 INCH PRO', price: 34500, category: 'LED TV', brand: 'Xiaomi' },
+            { id: 'tv-9', name: 'Xiaomi 65 INCH PRO', price: 51500, category: 'LED TV', brand: 'Xiaomi' },
+            { id: 'tv-10', name: 'SAMSUNG 32 inch TV (Voice Remote)', price: 11700, category: 'LED TV', brand: 'Samsung' },
+            { id: 'tv-11', name: 'SAMSUNG 43 INCH TV', price: 24000, category: 'LED TV', brand: 'Samsung' },
+            { id: 'tv-12', name: 'cellecore E43Mt+ frameless', price: 16000, category: 'LED TV', brand: 'cellecore' }
+        ];
+        state.products = RAW_PRODUCT_DATA;
+
+        // Utility to format price
+        const formatPrice = (price) => `₹${price.toLocaleString('en-IN')}`;
+
+        // --- FIREBASE INITIALIZATION AND AUTH ---
+        const initFirebase = async () => {
+            try {
+                if (Object.keys(firebaseConfig).length === 0) {
+                    console.error("Firebase config is missing. Data persistence disabled.");
+                    return;
+                }
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+                setLogLevel('debug');
+
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    await signInAnonymously(auth);
+                }
+
+                onAuthStateChanged(auth, (user) => {
+                    if (user) {
+                        userId = user.uid;
+                        console.log(`Authenticated with userId: ${userId}`);
+                        isAuthReady = true;
+                        setupCartListener();
+                    } else {
+                        console.log("No user signed in. Using anonymous ID.");
+                    }
+                });
+
+            } catch (error) {
+                console.error("Error initializing Firebase:", error);
+            }
+        };
+
+        // --- FIREBASE CART FUNCTIONS ---
+
+        const getCartDocRef = () => {
+            if (!userId) return null;
+            // Private collection for user's cart
+            return doc(db, `/artifacts/${appId}/users/${userId}/carts`, 'current');
+        };
+
+        const setupCartListener = () => {
+            if (!isAuthReady || !userId || !db) return;
+            const cartRef = getCartDocRef();
+            if (!cartRef) return;
+
+            onSnapshot(cartRef, (docSnap) => {
+                if (docSnap.exists()) {
+                    state.cart = docSnap.data().items || {};
+                } else {
+                    state.cart = {};
+                }
+                renderCart();
+            }, (error) => {
+                console.error("Error listening to cart:", error);
+            });
+        };
+
+        const saveCart = async () => {
+            if (!isAuthReady || !userId || !db) {
+                console.warn("Cannot save cart: Authentication not ready.");
+                renderCart(); // Still render to local state even if we can't save
+                return;
+            }
+            try {
+                const cartRef = getCartDocRef();
+                await setDoc(cartRef, { items: state.cart, lastUpdated: serverTimestamp() }, { merge: true });
+            } catch (error) {
+                console.error("Error saving cart to Firestore:", error);
+            }
+        };
+
+        // --- STATE MODIFIERS ---
+
+        const updateCart = (productId, quantityChange) => {
+            const currentQty = state.cart[productId] ? state.cart[productId].qty : 0;
+            const newQty = currentQty + quantityChange;
+
+            if (newQty > 0) {
+                const product = state.products.find(p => p.id === productId);
+                state.cart[productId] = { ...product, qty: newQty };
+            } else {
+                delete state.cart[productId];
+            }
+            saveCart();
+        };
+
+        const clearCart = () => {
+            state.cart = {};
+            saveCart();
+        };
+
+        const setCategory = (category) => {
+            state.currentCategory = category;
+            state.searchTerm = '';
+            document.getElementById('search-input').value = '';
+            renderProducts();
+            renderCategories();
+        };
+
+        const setSearchTerm = (term) => {
+            state.searchTerm = term.toLowerCase();
+            renderProducts();
+        };
+
+
+        // --- RENDERING FUNCTIONS ---
+
+        const getFilteredProducts = () => {
+            return state.products.filter(product => {
+                const matchesCategory = state.currentCategory === 'All Products' || product.category === state.currentCategory;
+                const matchesSearch = product.name.toLowerCase().includes(state.searchTerm) || product.brand.toLowerCase().includes(state.searchTerm) || (product.specs && product.specs.toLowerCase().includes(state.searchTerm));
+                return matchesCategory && matchesSearch;
+            }).sort((a, b) => a.price - b.price); // Sort by price ascending
+        };
+
+        const renderCategories = () => {
+            // Include main categories and then the specific types
+            const productCategories = ['All Products', 'Mobile Phone', 'Accessory', 'Smart Watch', 'Audio', 'Feature Phone', 'Tablet', 'LED TV', 'TV/Smart Device'];
+            
+            const container = document.getElementById('category-filter');
+            container.innerHTML = productCategories.map(cat => `
+                <button onclick="window.app.setCategory('${cat}')"
+                    class="px-4 py-2 text-sm font-medium rounded-full transition-all duration-200 whitespace-nowrap
+                    ${state.currentCategory === cat ? 'bg-indigo-600 text-white shadow-lg' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}">
+                    ${cat}
+                </button>
+            `).join('');
+        };
+
+        const renderProducts = () => {
+            const container = document.getElementById('product-grid');
+            const products = getFilteredProducts();
+            container.innerHTML = products.map(p => {
+                const cartItem = state.cart[p.id];
+                const qtyInCart = cartItem ? cartItem.qty : 0;
+                return `
+                    <div class="bg-white p-4 shadow-xl rounded-xl flex flex-col justify-between transform transition duration-300 hover:scale-[1.02]">
+                        <div>
+                            <span class="text-xs font-semibold text-indigo-500 bg-indigo-50 px-2 py-0.5 rounded-full">${p.brand} - ${p.category}</span>
+                            <h3 class="text-lg font-bold text-gray-800 mt-1">${p.name}</h3>
+                            ${p.specs ? `<p class="text-sm text-gray-500 mb-2">${p.specs}</p>` : ''}
+                            <p class="text-2xl font-extrabold text-red-600">${formatPrice(p.price)}</p>
+                            <p class="text-xs text-red-500 font-semibold mt-1">Cash Rate Only 💵</p>
+                        </div>
+                        <div class="mt-4 flex justify-between items-center">
+                            <div class="text-sm font-medium text-gray-600">
+                                ${qtyInCart > 0 ? `<span class="text-indigo-600">${qtyInCart} in Cart</span>` : 'Available'}
+                            </div>
+                            <button onclick="window.app.updateCart('${p.id}', 1)"
+                                class="bg-indigo-500 text-white px-4 py-2 rounded-lg font-semibold hover:bg-indigo-600 transition-colors shadow-md shadow-indigo-300">
+                                + Add
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }).join('') || `<div class="col-span-full text-center py-10 text-gray-500 text-xl">No products found for this search/category.</div>`;
+        };
+
+        const renderCart = () => {
+            const cartItemsContainer = document.getElementById('cart-items');
+            const cartTotalElement = document.getElementById('cart-total');
+            const checkoutButton = document.getElementById('checkout-button');
+            const cartCountElement = document.getElementById('cart-count');
+
+            const items = Object.values(state.cart);
+            let total = 0;
+
+            cartItemsContainer.innerHTML = items.map(item => {
+                const itemTotal = item.price * item.qty;
+                total += itemTotal;
+                return `
+                    <div class="flex items-center justify-between py-2 border-b border-gray-100 last:border-b-0">
+                        <div class="flex-grow">
+                            <p class="font-semibold text-gray-800">${item.name} (${item.brand})</p>
+                            <p class="text-sm text-gray-500">${formatPrice(item.price)} x ${item.qty}</p>
+                        </div>
+                        <div class="flex items-center space-x-2">
+                            <button onclick="window.app.updateCart('${item.id}', -1)" class="text-red-500 hover:text-red-600 text-lg p-1">-</button>
+                            <span class="font-bold text-indigo-600">${item.qty}</span>
+                            <button onclick="window.app.updateCart('${item.id}', 1)" class="text-green-500 hover:text-green-600 text-lg p-1">+</button>
+                        </div>
+                        <span class="font-semibold text-gray-700 w-20 text-right">${formatPrice(itemTotal)}</span>
+                    </div>
+                `;
+            }).join('');
+            
+            if (items.length === 0) {
+                 cartItemsContainer.innerHTML = '<p class="text-gray-500 text-center py-8">Your cart is empty. Start shopping!</p>';
+            }
+
+
+            cartTotalElement.textContent = formatPrice(total);
+            cartCountElement.textContent = items.length;
+
+            if (items.length > 0) {
+                checkoutButton.classList.remove('opacity-50', 'cursor-not-allowed');
+                checkoutButton.disabled = false;
+            } else {
+                checkoutButton.classList.add('opacity-50', 'cursor-not-allowed');
+                checkoutButton.disabled = true;
+            }
+
+            renderProducts(); // Re-render product grid to update cart badges
+        };
+
+        // --- CHECKOUT & ORDER FUNCTIONS ---
+
+        const openCheckoutModal = () => {
+            document.getElementById('checkout-modal').classList.remove('hidden');
+        };
+
+        const closeCheckoutModal = () => {
+            document.getElementById('checkout-modal').classList.add('hidden');
+        };
+
+        const openNotificationModal = (message) => {
+            const notifModal = document.getElementById('notification-modal');
+            document.getElementById('notification-content').innerHTML = message;
+            notifModal.classList.remove('hidden');
+        };
+
+        const closeNotificationModal = () => {
+            document.getElementById('notification-modal').classList.add('hidden');
+        };
+
+        const placeOrder = async (event) => {
+            event.preventDefault();
+            
+            const name = document.getElementById('customer-name').value;
+            const phone = document.getElementById('customer-phone').value;
+            const address = document.getElementById('customer-address').value;
+
+            if (!name || !phone || !address || Object.keys(state.cart).length === 0) {
+                alert('Please fill all fields and ensure the cart is not empty.');
+                return;
+            }
+
+            const itemsArray = Object.values(state.cart).map(item => ({
+                id: item.id,
+                name: item.name,
+                brand: item.brand,
+                price: item.price,
+                qty: item.qty
+            }));
+
+            const total = itemsArray.reduce((sum, item) => sum + (item.price * item.qty), 0);
+            
+            const orderData = {
+                customerName: name,
+                customerPhone: phone,
+                shippingAddress: address,
+                items: itemsArray,
+                totalAmount: total,
+                orderDate: serverTimestamp(),
+                status: 'Pending',
+                processedByUserId: userId 
+            };
+
+            // 1. Save order to Public Orders Collection
+            if (isAuthReady && db) {
+                try {
+                    const ordersRef = collection(db, `/artifacts/${appId}/public/data/orders`);
+                    const docRef = await addDoc(ordersRef, orderData);
+                    console.log("Order placed and saved with ID:", docRef.id);
+                    
+                    // 2. Clear customer's cart after successful placement
+                    clearCart();
+                    
+                    // 3. Simulate SMS/WhatsApp Notification (The required feature)
+                    const itemsList = itemsArray.map(item => `  - ${item.brand} ${item.name} x ${item.qty} (${formatPrice(item.price * item.qty)})`).join('\n');
+                    const notificationMessage = `
+                        <p class="text-xl font-bold text-indigo-700">🔔 NEW PURCHASE NOTIFICATION 🔔</p>
+                        <p class="text-gray-700 mt-2">Simulated alert for **GLOBAL MOBILE E-Shop**</p>
+                        <div class="bg-gray-100 p-4 rounded-lg mt-4 font-mono text-sm">
+                            <p class="font-bold text-red-600 mb-2">Order ID: ${docRef.id} - CASH ONLY</p>
+                            <p><strong>Customer Name:</strong> ${name}</p>
+                            <p><strong>Phone to Contact:</strong> ${phone}</p>
+                            <p class="mt-2 font-bold">--- PURCHASING LIST ---</p>
+                            <pre class="whitespace-pre-wrap text-xs">${itemsList}</pre>
+                            <p class="mt-2 font-bold text-lg text-indigo-700">TOTAL SALE: ${formatPrice(total)}</p>
+                        </div>
+                        <p class="text-xs text-gray-500 mt-4">This message simulates the real-time notification you would receive on your mentioned phone number.</p>
+                    `;
+                    
+                    closeCheckoutModal();
+                    openNotificationModal(notificationMessage);
+
+                    // Clear form
+                    document.getElementById('checkout-form').reset();
+                    
+                } catch (e) {
+                    console.error("Error adding document: ", e);
+                    // Fallback visual feedback if Firestore fails
+                    const fallbackMessage = `
+                        <p class="text-xl font-bold text-red-700">⚠️ Order Failed to Save</p>
+                        <p class="text-gray-700 mt-2">Error connecting to database. Please check console.</p>
+                    `;
+                    closeCheckoutModal();
+                    openNotificationModal(fallbackMessage);
+                }
+            } else {
+                 alert("Cannot process order: Authentication not ready. Please refresh the page or wait a moment and try again.");
+            }
+        };
+
+
+        // --- INITIALIZATION ---
+
+        window.onload = () => {
+            initFirebase();
+            renderCategories();
+            renderProducts();
+            renderCart();
+            
+            // Expose public functions to the global scope for HTML event handlers
+            window.app = { updateCart, setCategory, setSearchTerm, openCheckoutModal, placeOrder };
+
+            document.getElementById('search-input').addEventListener('input', (e) => setSearchTerm(e.target.value));
+            document.getElementById('checkout-form').addEventListener('submit', placeOrder);
+            document.getElementById('checkout-close').addEventListener('click', closeCheckoutModal);
+            document.getElementById('notification-close').addEventListener('click', closeNotificationModal);
+        };
+    </script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+        body { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
+        /* Hide scrollbar for category filter but allow scrolling */
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
+        .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+    </style>
+</head>
+<body>
+
+    <!-- Main Content Container -->
+    <div class="min-h-screen flex flex-col">
+        
+        <!-- Header & Branding -->
+        <header class="bg-indigo-700 shadow-lg sticky top-0 z-10">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
+                <h1 class="text-2xl sm:text-3xl font-extrabold text-white tracking-wider">GLOBAL MOBILE E-Shop</h1>
+                <div class="flex items-center space-x-3">
+                    <span class="text-xs font-light text-indigo-200 hidden sm:inline">Jai shree Krishna | Jai mata di 🙏🏻 | Updated: 07/11/2025</span>
+                    <div class="relative">
+                        <button onclick="document.getElementById('cart-sidebar').classList.toggle('translate-x-full')" 
+                                class="p-2 rounded-full bg-indigo-600 text-white hover:bg-indigo-500 transition-colors shadow-md">
+                            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 11-4 0 2 2 0 014 0z"></path></svg>
+                        </button>
+                        <span id="cart-count" class="absolute top-0 right-0 inline-flex items-center justify-center px-2 py-1 text-xs font-bold leading-none text-red-100 transform translate-x-1/2 -translate-y-1/2 bg-red-600 rounded-full">0</span>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Search and Filter Bar -->
+        <div class="bg-white shadow-md py-4">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <input id="search-input" type="text" placeholder="Search by model, brand, or specs (e.g., Samsung S24, 8/128)"
+                       class="w-full p-3 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500 transition-shadow mb-4">
+                
+                <div id="category-filter" class="flex overflow-x-auto space-x-3 pb-2 scrollbar-hide">
+                    <!-- Categories rendered here -->
+                </div>
+            </div>
+        </div>
+        
+        <!-- Product Grid -->
+        <main class="flex-grow max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+            <h2 class="text-2xl font-bold text-gray-800 mb-6">ALL PRODUCTS (ONLY CASH 💵 RATE)</h2>
+            <div id="product-grid" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6">
+                <!-- Product cards rendered here -->
+            </div>
+        </main>
+
+        <!-- Footer -->
+        <footer class="bg-gray-800 text-white py-6 mt-10">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+                <p class="text-lg font-semibold">GLOBAL MOBILE E-Shop</p>
+                <p class="text-sm mt-2">For Color & Other Enquiry, Call: 
+                    <a href="tel:01614678996" class="hover:text-indigo-400">01614678996</a> | 
+                    <a href="tel:7719640540" class="hover:text-indigo-400">7719640540</a> | 
+                    <a href="tel:8837740500" class="hover:text-indigo-400">8837740500</a>
+                </p>
+                <p class="text-xs mt-3 text-gray-400">© 2025 GLOBAL MOBILE E-Shop. All rates are CASH ONLY.</p>
+                <p class="text-xs mt-1 text-gray-400">Admin User ID: <span class="font-mono text-xs">${userId || 'Loading...'}</span></p>
+            </div>
+        </footer>
+    </div>
+    
+    <!-- Cart Sidebar (Off-Canvas) -->
+    <div id="cart-sidebar" class="fixed top-0 right-0 w-full md:w-96 bg-white h-full shadow-2xl z-20 transform translate-x-full transition-transform duration-300 ease-in-out p-6 overflow-y-auto">
+        <div class="flex justify-between items-center pb-4 border-b border-indigo-100">
+            <h3 class="text-2xl font-bold text-indigo-700">🛒 Your Cart</h3>
+            <button onclick="document.getElementById('cart-sidebar').classList.add('translate-x-full')" class="text-gray-500 hover:text-gray-800 transition-colors">
+                <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+            </button>
+        </div>
+        
+        <div id="cart-items" class="py-4 divide-y divide-gray-100">
+            <p class="text-gray-500 text-center py-8">Your cart is empty.</p>
+        </div>
+
+        <div class="border-t border-indigo-200 pt-4 mt-auto">
+            <div class="flex justify-between items-center text-xl font-bold mb-4">
+                <span>TOTAL:</span>
+                <span id="cart-total" class="text-red-600">₹0</span>
+            </div>
+            <button id="checkout-button" onclick="window.app.openCheckoutModal()" disabled
+                class="w-full bg-red-600 text-white py-3 rounded-lg font-bold text-lg hover:bg-red-700 transition-colors shadow-lg shadow-red-300 opacity-50 cursor-not-allowed">
+                PROCEED TO CHECKOUT
+            </button>
+            <button onclick="window.app.clearCart()"
+                class="w-full mt-2 bg-gray-200 text-gray-700 py-2 rounded-lg font-semibold hover:bg-gray-300 transition-colors">
+                Clear Cart
+            </button>
+        </div>
+    </div>
+
+    <!-- Checkout Modal (For Customer Details) -->
+    <div id="checkout-modal" class="hidden fixed inset-0 bg-gray-900 bg-opacity-75 z-30 flex items-center justify-center p-4">
+        <div class="bg-white p-6 rounded-xl shadow-2xl w-full max-w-md">
+            <div class="flex justify-between items-center border-b pb-3 mb-4">
+                <h3 class="text-2xl font-bold text-indigo-700">Customer Details</h3>
+                <button id="checkout-close" class="text-gray-500 hover:text-gray-800 text-lg">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                </button>
+            </div>
+            
+            <form id="checkout-form">
+                <div class="space-y-4">
+                    <div>
+                        <label for="customer-name" class="block text-sm font-medium text-gray-700">Full Name</label>
+                        <input type="text" id="customer-name" required class="mt-1 block w-full p-3 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500">
+                    </div>
+                    <div>
+                        <label for="customer-phone" class="block text-sm font-medium text-gray-700">Phone Number (For Notification)</label>
+                        <input type="tel" id="customer-phone" required pattern="[0-9]{10,12}" class="mt-1 block w-full p-3 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500" placeholder="e.g., 9876543210 (10-12 digits)">
+                    </div>
+                    <div>
+                        <label for="customer-address" class="block text-sm font-medium text-gray-700">Shipping Address</label>
+                        <textarea id="customer-address" rows="3" required class="mt-1 block w-full p-3 border border-gray-300 rounded-md shadow-sm focus:ring-indigo-500 focus:border-indigo-500"></textarea>
+                    </div>
+                    <div class="mt-6 p-4 bg-yellow-50 rounded-lg text-sm text-yellow-800 font-semibold border border-yellow-200">
+                        Payment Method: Cash on Delivery (COD) - Total Cash Rate Only.
+                    </div>
+                </div>
+                
+                <button type="submit" class="mt-6 w-full bg-indigo-600 text-white py-3 rounded-lg font-bold text-lg hover:bg-indigo-700 transition-colors shadow-xl shadow-indigo-300">
+                    PLACE ORDER & GET NOTIFICATION
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Notification Modal (Simulates the SMS/WhatsApp Alert) -->
+    <div id="notification-modal" class="hidden fixed inset-0 bg-gray-900 bg-opacity-75 z-40 flex items-center justify-center p-4">
+        <div class="bg-white p-6 rounded-xl shadow-2xl w-full max-w-lg">
+            <div class="flex justify-end">
+                <button id="notification-close" class="text-gray-500 hover:text-gray-800 text-lg">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                </button>
+            </div>
+            <div id="notification-content" class="py-4">
+                <!-- Notification message rendered here -->
+            </div>
+            <button onclick="closeNotificationModal()" class="mt-4 w-full bg-green-600 text-white py-2 rounded-lg font-semibold hover:bg-green-700 transition-colors">
+                CLOSE (View My Shop Owner Panel)
+            </button>
+        </div>
+    </div>
+
+</body>
+</html>
+
